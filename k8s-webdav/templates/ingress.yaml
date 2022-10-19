@@ -1,24 +1,59 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "chart.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- if and .Values.ingress.className (not (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion)) }}
+  {{- if not (hasKey .Values.ingress.annotations "kubernetes.io/ingress.class") }}
+  {{- $_ := set .Values.ingress.annotations "kubernetes.io/ingress.class" .Values.ingress.className}}
+  {{- end }}
+{{- end }}
+{{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
 apiVersion: networking.k8s.io/v1
+{{- else if semverCompare ">=1.14-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1beta1
+{{- else -}}
+apiVersion: extensions/v1beta1
+{{- end }}
 kind: Ingress
 metadata:
-  name: {{ include "webdav.fullname" . }}
+  name: {{ $fullName }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
   annotations:
-  {{- with .Values.ingress.annotations }}
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-FS-1-2-Res-2020-10
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    external-dns.alpha.kubernetes.io/hostname: {{ template "hostname" .Values.service.url }}
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+    alb.ingress.kubernetes.io/wafv2-acl-arn: {{ .Values.ingress.waf_arn }}
+    {{- if eq .Values.service.url "http://www.k2022.sepro-group.cloud" }}
+    alb.ingress.kubernetes.io/auth-type: cognito
+    alb.ingress.kubernetes.io/auth-idp-cognito: '{{ .Values.ingress.cognito }}'
+    alb.ingress.kubernetes.io/auth-on-unauthenticated-request: {{ .Values.ingress.on_unauthenticated_request }}
+    alb.ingress.kubernetes.io/auth-scope: 'email openid profile'
+    {{- end }}
 spec:
-  rules:
-  - host: {{ .Values.ingress.host }}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ include "webdav.fullname" . }}
-            port:
-              number: 80
+  ingressClassName: {{ .Values.ingress.className }}
   tls:
   - hosts:
-    - {{ .Values.ingress.host }}
-    secretName: webdav-tls-secret
+    - {{ template "hostname" .Values.service.url }}
+  rules:
+    - host: {{ template "hostname" .Values.service.url }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path | default "/" | quote }}
+            {{- if .Capabilities.APIVersions.Has "networking.k8s.io/v1/Ingress" }}
+            pathType: Prefix
+            {{- end }}
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+              {{- else }}
+              serviceName: {{ $fullName }}
+              servicePort: {{ .Values.service.port }}
+              {{- end }}
+{{- end -}}
