@@ -13,8 +13,10 @@ spec:
       paths:
       - path: /
         backend:
-          serviceName: {{ include "webdav.fullname" . }}
-          servicePort: 80
+          service
+            name: {{ include "webdav.fullname" . }}
+            port:
+              number: 80
   tls:
   - hosts:
     - {{ .Values.ingress.host }}
